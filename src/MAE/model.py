@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from typing import Sequence, Union, Literal
+from typing import Sequence, Union, Literal, Tuple
 
 from MAE.embedding import PatchEmbed, PositionEmbed
 from MAE.weight_init import trunc_normal_
@@ -79,7 +79,7 @@ class MaskedAutoencoder(nn.Module):
         # MAE decoder
 
         self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
-        self.mask_tokens = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
 
         self.decoder_pos_embed = PositionEmbed(
             num_patches=num_patches,
@@ -107,7 +107,6 @@ class MaskedAutoencoder(nn.Module):
             *decoder_blocks, nn.LayerNorm(decoder_embed_dim)
         )
 
-        self.decoder_norm = nn.LayerNorm(decoder_embed_dim)
         self.decoder_pred = nn.Linear(
             decoder_embed_dim, int(np.prod(patch_size)) * in_channels, bias=True
         )
@@ -119,7 +118,7 @@ class MaskedAutoencoder(nn.Module):
         _ = torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
 
         # initialize patch_embedding like nn.Linear (instead of nn.Conv2d)
-        _ = trunc_normal_(self.mask_tokens, mean=0.0, std=0.02, a=-2.0, b=2.0)
+        _ = trunc_normal_(self.mask_token, mean=0.0, std=0.02, a=-2.0, b=2.0)
         _ = trunc_normal_(self.cls_token, mean=0.0, std=0.02, a=-2.0, b=2.0)
 
         _ = self.apply(self._init_weights)
@@ -135,4 +134,76 @@ class MaskedAutoencoder(nn.Module):
             _ = nn.init.zeros_(m.bias)
             _ = nn.init.ones_(m.weight)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def random_masking(self, x: torch.Tensor):
+        """
+        Perform per-sample random masking by per-sample shuffling.
+        Per-sample shuffling is done by argsort random noise.
+        x: [B, L, D], sequence
+        """
+        B, L, D = x.shape  # batch, length, dim
+        n_keep = int(L * (1 - self.mask_ratio))
+
+        noise = torch.rand(B, L, device=x.device)  # noise in [0, 1]
+
+        # sort noise for each sample
+        ids_shuffle = torch.argsort(
+            noise, dim=1
+        )  # ascend: small is keep, large is remove
+        ids_restore = torch.argsort(ids_shuffle, dim=1)
+
+        # keep the first subset
+        ids_keep = ids_shuffle[:, :n_keep]
+        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
+
+        # generate the binary mask: 0 is keep, 1 is remove
+        mask = torch.ones([B, L], device=x.device)
+        mask[:, :n_keep] = 0
+        # unshuffle to get the binary mask
+        mask = torch.gather(mask, dim=1, index=ids_restore)
+
+        return x_masked, mask, ids_restore
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, ...]:
+        # --------------------------------------------------------------------------
+        # MAE encoder
+
+        # embed patches
+        x = self.patch_embed(x)
+        # add pos embed w/o cls token
+        x = self.pos_embed(x)
+
+        x, mask, ids_restore = self.random_masking(x)
+
+        # combine cls tokens with the patch tokens
+        cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+
+        # apply Transformer blocks
+        x = self.blocks(x)
+
+        # --------------------------------------------------------------------------
+        # MAE decoder
+        x = self.decoder_embed(x)
+
+        # append mask tokens to sequence
+        mask_tokens = self.mask_token.repeat(
+            x.shape[0], ids_restore.shape[1] - x.shape[1], 1
+        )
+        x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
+        x_ = torch.gather(
+            x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2])
+        )  # unshuffle
+
+        # add pos embed
+        x_ = self.decoder_pos_embed(x_)
+
+        # append cls token
+        x = torch.cat([x[:, :1, :], x_], dim=1)
+
+        # apply Transformer blocks
+        x = self.decoder_blocks(x)
+        x = self.decoder_pred(x)
+
+        x = x[:, 1:, :]  # remove cls token
+
+        return x, mask
