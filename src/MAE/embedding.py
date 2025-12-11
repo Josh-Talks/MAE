@@ -68,8 +68,8 @@ class PositionEmbed(nn.Module):
         num_patches: int,
         embed_dim: int,
         spatial_dims: int,
-        img_size: Optional[Sequence[int]] = None,
-        patch_size: Optional[Sequence[int]] = None,
+        img_size: Optional[Union[Sequence[int], int]] = None,
+        patch_size: Optional[Union[Sequence[int], int]] = None,
         pos_embed_type: Literal["none", "learnable", "sincos"] = "sincos",
     ):
         super().__init__()
@@ -83,6 +83,8 @@ class PositionEmbed(nn.Module):
             assert (
                 img_size is not None and patch_size is not None
             ), "img_size and patch_size must be provided for sincos positional embedding"
+            img_size = ensure_tuple(img_size, dim=spatial_dims)
+            patch_size = ensure_tuple(patch_size, dim=spatial_dims)
             grid_size: List[int] = []
             for in_size, pa_size in zip(img_size, patch_size):
                 grid_size.append(in_size // pa_size)
