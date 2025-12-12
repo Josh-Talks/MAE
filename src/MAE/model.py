@@ -52,6 +52,8 @@ class MaskedAutoencoder(nn.Module):
         self.num_classes = num_classes
         self.img_size = ensure_tuple(img_size, dim=spatial_dims)
         self.patch_size = ensure_tuple(patch_size, dim=spatial_dims)
+        self.in_channels = in_channels
+        self.spatial_dims = spatial_dims
 
         # --------------------------------------------------------------------------
         # MAE encoder
@@ -123,10 +125,8 @@ class MaskedAutoencoder(nn.Module):
         self.decoder_blocks = nn.Sequential(
             *decoder_blocks, nn.LayerNorm(decoder_embed_dim)
         )
-
-        self.decoder_pred = nn.Linear(
-            decoder_embed_dim, int(np.prod(self.patch_size)) * in_channels, bias=True
-        )
+        self.output_dim = int(np.prod(self.patch_size)) * in_channels
+        self.decoder_pred = nn.Linear(decoder_embed_dim, self.output_dim, bias=True)
 
         self.initialize_weights()
 
@@ -179,6 +179,93 @@ class MaskedAutoencoder(nn.Module):
         mask = torch.gather(mask, dim=1, index=ids_restore)
 
         return x_masked, mask, ids_restore
+
+    def unpatchify(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Reshape patches back to original image dimensions without modifying values.
+        Assumes patches are in row-major order (for 2D) or depth-row-major order (for 3D).
+
+        x: (N, L, prod(patch_size) * in_channels)
+        Returns: (N, in_channels, *img_size)
+        """
+        if self.spatial_dims == 2:
+            # x shape: (N, h*w, p*p*c)
+            p_h, p_w = self.patch_size[0], self.patch_size[1]
+            h = self.img_size[0] // p_h  # number of patches in height
+            w = self.img_size[1] // p_w  # number of patches in width
+
+            # Reshape to (N, h, w, p_h, p_w, c)
+            img = x.view(-1, h, w, p_h, p_w, self.in_channels)
+
+            # Rearrange to (N, c, h, p_h, w, p_w) then (N, c, h*p_h, w*p_w)
+            img = img.permute(0, 5, 1, 3, 2, 4).contiguous()
+            img = img.view(-1, self.in_channels, self.img_size[0], self.img_size[1])
+
+        elif self.spatial_dims == 3:
+            # x shape: (N, d*h*w, p_d*p_h*p_w*c)
+            p_d, p_h, p_w = self.patch_size[0], self.patch_size[1], self.patch_size[2]
+            d = self.img_size[0] // p_d  # number of patches in depth
+            h = self.img_size[1] // p_h  # number of patches in height
+            w = self.img_size[2] // p_w  # number of patches in width
+
+            # Reshape to (N, d, h, w, p_d, p_h, p_w, c)
+            img = x.view(-1, d, h, w, p_d, p_h, p_w, self.in_channels)
+
+            # Rearrange to (N, c, d, p_d, h, p_h, w, p_w) then (N, c, d*p_d, h*p_h, w*p_w)
+            img = img.permute(0, 7, 1, 4, 2, 5, 3, 6).contiguous()
+            img = img.view(
+                -1,
+                self.in_channels,
+                self.img_size[0],
+                self.img_size[1],
+                self.img_size[2],
+            )
+        else:
+            raise ValueError("spatial_dims must be 2 or 3")
+
+        return img
+
+    def patchify(self, imgs: torch.Tensor) -> torch.Tensor:
+        """
+        Convert images into patches.
+        Assumes images are in (N, in_channels, *img_size) format.
+
+        imgs: (N, in_channels, *img_size)
+        Returns: (N, L, prod(patch_size) * in_channels)
+        """
+        N = imgs.shape[0]
+        if self.spatial_dims == 2:
+            p_h, p_w = self.patch_size[0], self.patch_size[1]
+            h, w = self.img_size[0], self.img_size[1]
+            assert (
+                h % p_h == 0 and w % p_w == 0
+            ), "Image dimensions must be divisible by patch size."
+
+            # Reshape to (N, c, h//p_h, p_h, w//p_w, p_w)
+            x = imgs.view(N, self.in_channels, h // p_h, p_h, w // p_w, p_w)
+
+            # Rearrange to (N, h//p_h, w//p_w, p_h, p_w, c) then (N, L, p_h*p_w*c)
+            x = x.permute(0, 2, 4, 3, 5, 1).contiguous()
+            x = x.view(N, -1, p_h * p_w * self.in_channels)
+
+        elif self.spatial_dims == 3:
+            p_d, p_h, p_w = self.patch_size[0], self.patch_size[1], self.patch_size[2]
+            d, h, w = self.img_size[0], self.img_size[1], self.img_size[2]
+            assert (
+                d % p_d == 0 and h % p_h == 0 and w % p_w == 0
+            ), "Image dimensions must be divisible by patch size."
+
+            # Reshape to (N, c, d//p_d, p_d, h//p_h, p_h, w//p_w, p_w)
+            x = imgs.view(
+                N, self.in_channels, d // p_d, p_d, h // p_h, p_h, w // p_w, p_w
+            )
+
+            # Rearrange to (N, d//p_d, h//p_h, w//p_w, p_d, p_h, p_w, c) then (N, L, p_d*p_h*p_w*c)
+            x = x.permute(0, 2, 4, 6, 3, 5, 7, 1).contiguous()
+            x = x.view(N, -1, p_d * p_h * p_w * self.in_channels)
+        else:
+            raise ValueError("spatial_dims must be 2 or 3")
+        return x
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, ...]:
         # --------------------------------------------------------------------------
