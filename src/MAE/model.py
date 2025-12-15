@@ -4,8 +4,9 @@ import torch.nn as nn
 from typing import Sequence, Union, Literal, Tuple
 
 from MAE.embedding import PatchEmbed, PositionEmbed
-from MAE.weight_init import trunc_normal_
+from MAE.utils import ensure_tuple
 from MAE.ViT import TransformerBlock
+from MAE.weight_init import trunc_normal_
 
 
 class MaskedAutoencoder(nn.Module):
@@ -34,14 +35,32 @@ class MaskedAutoencoder(nn.Module):
     ):
         super().__init__()
 
+        assert (
+            0 <= dropout_rate <= 1
+        ), f"dropout_rate should be between 0 and 1, got {dropout_rate}."
+        assert (
+            0 <= attn_drop <= 1
+        ), f"attn_drop should be between 0 and 1, got {attn_drop}."
+        assert (
+            0 <= drop_path <= 1
+        ), f"drop_path should be between 0 and 1, got {drop_path}."
+        assert embed_dim % num_heads == 0, "embed_dim should be divisible by num_heads"
+        assert (
+            decoder_embed_dim % decoder_num_heads == 0
+        ), "decoder_embed_dim should be divisible by decoder_num_heads"
+
         self.num_classes = num_classes
+        self.img_size = ensure_tuple(img_size, dim=spatial_dims)
+        self.patch_size = ensure_tuple(patch_size, dim=spatial_dims)
+        self.in_channels = in_channels
+        self.spatial_dims = spatial_dims
 
         # --------------------------------------------------------------------------
         # MAE encoder
 
         self.patch_embed = PatchEmbed(
-            img_size=img_size,
-            patch_size=patch_size,
+            img_size=self.img_size,
+            patch_size=self.patch_size,
             in_channels=in_channels,
             embed_dim=embed_dim,
             spatial_dims=spatial_dims,
@@ -56,8 +75,8 @@ class MaskedAutoencoder(nn.Module):
             num_patches=num_patches,
             embed_dim=embed_dim,
             spatial_dims=spatial_dims,
-            img_size=img_size,
-            patch_size=patch_size,
+            img_size=self.img_size,
+            patch_size=self.patch_size,
             pos_embed_type=pos_embed_type,
         )
 
@@ -85,8 +104,8 @@ class MaskedAutoencoder(nn.Module):
             num_patches=num_patches,
             embed_dim=decoder_embed_dim,
             spatial_dims=spatial_dims,
-            img_size=img_size,
-            patch_size=patch_size,
+            img_size=self.img_size,
+            patch_size=self.patch_size,
             pos_embed_type=pos_embed_type,
         )
 
@@ -106,10 +125,8 @@ class MaskedAutoencoder(nn.Module):
         self.decoder_blocks = nn.Sequential(
             *decoder_blocks, nn.LayerNorm(decoder_embed_dim)
         )
-
-        self.decoder_pred = nn.Linear(
-            decoder_embed_dim, int(np.prod(patch_size)) * in_channels, bias=True
-        )
+        self.output_dim = int(np.prod(self.patch_size)) * in_channels
+        self.decoder_pred = nn.Linear(decoder_embed_dim, self.output_dim, bias=True)
 
         self.initialize_weights()
 
@@ -163,10 +180,9 @@ class MaskedAutoencoder(nn.Module):
 
         return x_masked, mask, ids_restore
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, ...]:
-        # --------------------------------------------------------------------------
-        # MAE encoder
-
+    def forward_encoder(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # embed patches
         x = self.patch_embed(x)
         # add pos embed w/o cls token
@@ -181,13 +197,17 @@ class MaskedAutoencoder(nn.Module):
         # apply Transformer blocks
         x = self.blocks(x)
 
-        # --------------------------------------------------------------------------
+        return x, mask, ids_restore
+
+    def forward_decoder(
+        self, x: torch.Tensor, ids_restore: torch.Tensor
+    ) -> torch.Tensor:
         # MAE decoder
         x = self.decoder_embed(x)
 
         # append mask tokens to sequence
         mask_tokens = self.mask_token.repeat(
-            x.shape[0], ids_restore.shape[1] - x.shape[1], 1
+            x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1
         )
         x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
         x_ = torch.gather(
@@ -206,4 +226,9 @@ class MaskedAutoencoder(nn.Module):
 
         x = x[:, 1:, :]  # remove cls token
 
+        return x
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, ...]:
+        x, mask, ids_restore = self.forward_encoder(x)
+        x = self.forward_decoder(x, ids_restore)
         return x, mask
