@@ -22,9 +22,9 @@ def mask_patched(input: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return masked_input
 
 
-class MSE_Loss(nn.Module):
+class MSELoss_patched(nn.Module):
     def __init__(self):
-        super(MSE_Loss, self).__init__()
+        super(MSELoss_patched, self).__init__()
         self.loss_fn = nn.MSELoss()
 
     def forward(
