@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 
-from MAE.dataclass import DataDimensions
+# from MAE.dataclass import DataDimensions
 from MAE.utils import patchify
+from MAE.model import MaskedAutoencoder
 
 
 def mask_patched(input: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -22,9 +23,9 @@ def mask_patched(input: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return masked_input
 
 
-class MSELoss_patched(nn.Module):
+class MSELossPatched(nn.Module):
     def __init__(self):
-        super(MSELoss_patched, self).__init__()
+        super(MSELossPatched, self).__init__()
         self.loss_fn = nn.MSELoss()
 
     def forward(
@@ -32,14 +33,14 @@ class MSELoss_patched(nn.Module):
         pred: torch.Tensor,
         target: torch.Tensor,
         mask: torch.Tensor,
-        data_dims: DataDimensions,
+        model: MaskedAutoencoder,
     ) -> torch.Tensor:
         target_patched = patchify(
             target,
-            data_dims.patch_size,
-            data_dims.img_size,
-            data_dims.in_channels,
-            data_dims.spatial_dims,
+            model.patch_size,
+            model.img_size,
+            model.in_channels,
+            model.spatial_dims,
         )
         target_masked = mask_patched(target_patched, mask)
         pred_masked = mask_patched(pred, mask)
