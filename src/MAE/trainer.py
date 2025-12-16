@@ -12,6 +12,8 @@ from MAE.model import MaskedAutoencoder, ModelConfig
 from MAE.lr_sched import adjust_learning_rate
 from MAE.logging import get_current_lr, get_logger, RunningAverage
 
+from MAE.datasets.dataset import get_pretrain_loader, LoaderConfig
+
 logger = get_logger("MAETrainer")
 
 
@@ -41,6 +43,7 @@ class MAETrainingConfig(BaseModel):
     optimizer_type: Literal["AdamW"]
     model_params: ModelConfig
     training_params: TrainingParameters
+    dataloader: LoaderConfig
 
 
 def create_trainer(config: MAETrainingConfig):
@@ -82,9 +85,11 @@ def create_trainer(config: MAETrainingConfig):
     else:
         raise ValueError(f"Unsupported optimizer type: {config.optimizer_type}")
 
+    pretrain_loader = get_pretrain_loader(config.dataloader)
+
     return MAETrainer(
         model=model,
-        dataloader=None,  # to be set later
+        dataloader=pretrain_loader,
         loss_criteria=loss_criteria,
         scaler=GradScaler(),
         optimizer=optimizer,
