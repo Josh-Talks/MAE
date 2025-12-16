@@ -1,4 +1,5 @@
 import numpy as np
+from pydantic import BaseModel
 import torch
 import torch.nn as nn
 from typing import Sequence, Union, Literal, Tuple
@@ -7,6 +8,27 @@ from MAE.embedding import PatchEmbed, PositionEmbed
 from MAE.utils import ensure_tuple
 from MAE.ViT import TransformerBlock
 from MAE.weight_init import trunc_normal_
+
+
+class ModelConfig(BaseModel):
+    img_size: Union[Sequence[int], int]
+    patch_size: Union[Sequence[int], int]
+    in_channels: int
+    embed_dim: int
+    num_classes: int
+    depth: int
+    num_heads: int
+    decoder_embed_dim: int
+    decoder_depth: int
+    decoder_num_heads: int
+    pos_embed_type: Literal["none", "learnable", "sincos"] = "sincos"
+    qkv_bias: bool = True
+    dropout_rate: float = 0.0
+    attn_drop: float = 0.0
+    drop_path: float = 0.0
+    mask_ratio: float = 0.75
+    mlp_ratio: float = 4.0
+    spatial_dims: int = 2
 
 
 class MaskedAutoencoder(nn.Module):
