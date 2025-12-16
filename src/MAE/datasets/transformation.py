@@ -38,6 +38,7 @@ class PercentileNormalizer:
         percentile_max: float = 99.6,
         channelwise: bool = False,
         eps: float = 1e-10,
+        **kwargs: Any,
     ):
         super().__init__()
         self.eps = eps
@@ -65,6 +66,54 @@ class PercentileNormalizer:
         return (m - pmin) / (pmax - pmin + self.eps)
 
 
+class Normalize:
+    """
+    Apply simple min-max scaling to a given input tensor, i.e. shrinks the range of the data
+    in a fixed range of [-1, 1] or in case of norm01==True to [0, 1]. In addition, data can be
+    clipped by specifying min_value/max_value either globally using single values or via a
+    list/tuple channelwise if enabled.
+    """
+
+    def __init__(
+        self,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+        norm01: bool = True,
+        channelwise: bool = False,
+        eps: float = 1e-10,
+        **kwargs: Any,
+    ):
+        super().__init__()
+        if min_value is not None and max_value is not None:
+            assert max_value > min_value
+        self.min_value = min_value
+        self.max_value = max_value
+        self.norm01 = norm01
+        self.channelwise = channelwise
+        self.eps = eps
+
+    def __call__(self, m: NDArray[Any]) -> NDArray[Any]:
+
+        if self.min_value is None:
+            min_value = np.min(m)
+        else:
+            min_value = self.min_value
+
+        if self.max_value is None:
+            max_value = np.max(m)
+        else:
+            max_value = self.max_value
+
+        # calculate norm_0_1 with min_value / max_value with the same dimension
+        # in case of channelwise application
+        norm_0_1 = (m - min_value) / (max_value - min_value + self.eps)
+
+        if self.norm01 is True:
+            return np.clip(norm_0_1, 0, 1)
+        else:
+            return np.clip(2 * norm_0_1 - 1, -1, 1)
+
+
 class RandomRotate90:
     """
     Rotate an array by 90 degrees around a randomly chosen plane. Image can be either 3D (DxHxW) or 4D (CxDxHxW).
@@ -75,7 +124,7 @@ class RandomRotate90:
     IMPORTANT: assumes DHW axis order (that's why rotation is performed across (1,2) axis)
     """
 
-    def __init__(self, random_state: np.random.RandomState):
+    def __init__(self, random_state: np.random.RandomState, **kwargs: Any):
         super().__init__()
         self.random_state = random_state
         # always rotate around z-axis
@@ -104,7 +153,9 @@ class RandomFlip:
     otherwise the models won't converge.
     """
 
-    def __init__(self, random_state: np.random.RandomState, axis_prob: float = 0.5):
+    def __init__(
+        self, random_state: np.random.RandomState, axis_prob: float = 0.5, **kwargs: Any
+    ):
         super().__init__()
         assert random_state is not None, "RandomState cannot be None"
         self.random_state = random_state
@@ -134,7 +185,7 @@ class ToTensor:
         dtype (np.dtype): the desired output data type
     """
 
-    def __init__(self, expand_dims: bool, dtype: str = "float32"):
+    def __init__(self, expand_dims: bool, dtype: str = "float32", **kwargs: Any):
         super().__init__()
         self.expand_dims = expand_dims
         self.dtype = return_dtype(dtype)
@@ -152,7 +203,7 @@ class ImageTransformations:
     def __init__(self, transforms_config: transforms_type, stats_config: StatsParams):
         super().__init__()
         self.transforms_config = transforms_config
-        self.config_base = stats_config
+        self.config_base = stats_config.model_dump()
         self.seed = GLOBAL_RANDOM_STATE.randint(10000000)
 
     def raw_transform(self):

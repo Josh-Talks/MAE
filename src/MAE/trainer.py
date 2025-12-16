@@ -156,7 +156,7 @@ class MAETrainer:
         lr = get_current_lr(self.optimizer)
         wandb.log({"learning-rate": lr}, step=self.current_iteration)
 
-        for x, y in self.dataloader:
+        for x in self.dataloader:
             # adjust learning rate
             lr = adjust_learning_rate(
                 self.opt_params.lr_sched_type,
@@ -175,11 +175,10 @@ class MAETrainer:
             )
 
             x = x.to(self.model.device)
-            y = y.to(self.model.device)
 
             with autocast("cuda"):
                 pred, mask = self.model(x)
-                loss = self.loss_criteria(pred, y, mask, self.model)
+                loss = self.loss_criteria(pred, x, mask, self.model)
 
             train_losses.update(loss.item(), self._batch_size(x))
 

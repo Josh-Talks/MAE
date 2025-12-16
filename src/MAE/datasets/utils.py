@@ -122,12 +122,15 @@ def get_class(class_name: str, modules: Sequence[str]):
 
 
 def loader_classes(class_name: str):
-    modules = ["MAE.datasets.utils", "MAE.datasets.dataset"]
+    modules = [
+        "MAE.datasets.utils",
+        "MAE.datasets.dataset",
+        "MAE.datasets.slice_builders",
+    ]
     return get_class(class_name, modules)
 
 
 def traverse_h5_paths(file_paths: Sequence[str]) -> List[str]:
-    assert isinstance(file_paths, list)
     results: List[str] = []
     for file_path in file_paths:
         if os.path.isdir(file_path):

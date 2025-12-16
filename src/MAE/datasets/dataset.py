@@ -54,7 +54,9 @@ default_loader: LoaderConfig = LoaderConfig(
     num_workers=8,
     dataset=DatasetConfig(
         name="StandardHDF5Dataset",
-        file_paths=("/g/kreshuk/talks/data/Hmito/train_converted.h5",),
+        file_paths=[
+            "/g/kreshuk/talks/data/Hmito/train_converted.h5",
+        ],
         raw_internal_path="raw",
         global_normalization=True,
         global_percentiles=None,
@@ -205,7 +207,6 @@ class AbstractHDF5Dataset(Dataset[Any]):
                     raw_internal_path=ds_cfg.raw_internal_path,
                     global_normalization=ds_cfg.global_normalization,
                     global_percentiles=ds_cfg.global_percentiles,
-                    auto_padding=None,
                 )
                 datasets.append(dataset)
             except Exception:
