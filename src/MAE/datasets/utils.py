@@ -1,7 +1,10 @@
+import glob
 import importlib
+from itertools import chain
+import os
 from numpy.typing import NDArray
 import numpy as np
-from typing import Any, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 from pydantic import BaseModel
 
@@ -16,9 +19,7 @@ def get_roi_slice(roi: Sequence[Tuple[int, ...]]):
     return slices
 
 
-def mirror_pad(
-    image: NDArray[Any], padding_shape: Tuple[int, int, int]
-) -> NDArray[Any]:
+def mirror_pad(image: NDArray[Any], padding_shape: Tuple[int, ...]) -> NDArray[Any]:
     """
     Pad the image with a mirror reflection of itself.
 
@@ -123,3 +124,20 @@ def get_class(class_name: str, modules: Sequence[str]):
 def loader_classes(class_name: str):
     modules = ["MAE.datasets.utils", "MAE.datasets.slice_builders"]
     return get_class(class_name, modules)
+
+
+def traverse_h5_paths(file_paths: Sequence[str]) -> List[str]:
+    assert isinstance(file_paths, list)
+    results: List[str] = []
+    for file_path in file_paths:
+        if os.path.isdir(file_path):
+            # if file path is a directory take all H5 files in that directory
+            iters = [
+                glob.glob(os.path.join(file_path, ext))
+                for ext in ["*.h5", "*.hdf", "*.hdf5", "*.hd5"]
+            ]
+            for fp in chain(*iters):
+                results.append(fp)
+        else:
+            results.append(file_path)
+    return results

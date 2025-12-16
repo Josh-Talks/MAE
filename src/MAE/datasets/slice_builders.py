@@ -24,7 +24,7 @@ class BaseShapeWrapper:
         file_path: str,
         internal_path: str,
         roi: Optional[Tuple[slice[Any, Any, Any], ...]] = None,
-        auto_padding: Optional[Tuple[int, int, int]] = None,
+        auto_padding: Optional[Tuple[int, ...]] = None,
     ):
         super().__init__()
         self.file_path = file_path
