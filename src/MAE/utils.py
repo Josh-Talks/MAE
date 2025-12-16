@@ -1,6 +1,11 @@
 import numpy as np
+from numpy.typing import NDArray
 import torch
-from typing import Sequence, Tuple, Union, List, Optional
+from typing import Any, Sequence, Tuple, TypeGuard, Union, List, Optional
+
+
+def is_ndarray(v: Any) -> TypeGuard[NDArray[Any]]:
+    return isinstance(v, np.ndarray)
 
 
 def ensure_tuple(x: Union[Sequence[int], int], dim: int) -> Tuple[int, ...]:
