@@ -1,6 +1,5 @@
 import math
 from pydantic import BaseModel
-import torch.nn as nn
 import torch
 from torch.utils.data import DataLoader
 from torch.amp.grad_scaler import GradScaler
@@ -9,20 +8,22 @@ from typing import List, Literal, Optional, Tuple, Union
 import wandb
 
 from MAE.loss import MSELossPatched
-from MAE.model import MaskedAutoencoder
+from MAE.model import MaskedAutoencoder, ModelConfig
 from MAE.lr_sched import adjust_learning_rate
 from MAE.logging import get_current_lr, get_logger, RunningAverage
 
 logger = get_logger("MAETrainer")
 
 
-class LRParams(BaseModel):
-    lr: float
-    sched_type: Literal["step", "cosine"]
-
-
 class LoggingParams(BaseModel):
     log_after_n_iters: int
+
+
+class OptimizerParams(BaseModel):
+    optimizer_type: Literal["AdamW"]
+    weight_decay: float
+    lr: float
+    lr_sched_type: Literal["step", "cosine"]
 
 
 class TrainingParameters(BaseModel):
@@ -31,8 +32,64 @@ class TrainingParameters(BaseModel):
     warmup_epochs: int
     current_epoch: int
     current_iteration: int
-    lr_params: LRParams
+    optimizer_params: OptimizerParams
     logging_params: LoggingParams
+
+
+class MAETrainingConfig(BaseModel):
+    loss_type: Literal["MSE"]
+    optimizer_type: Literal["AdamW"]
+    model_params: ModelConfig
+    training_params: TrainingParameters
+
+
+def create_trainer(config: MAETrainingConfig):
+    # create model
+    model_cfg = config.model_params
+    model = MaskedAutoencoder(
+        img_size=model_cfg.img_size,
+        patch_size=model_cfg.patch_size,
+        in_channels=model_cfg.in_channels,
+        embed_dim=model_cfg.embed_dim,
+        num_classes=model_cfg.num_classes,
+        depth=model_cfg.depth,
+        num_heads=model_cfg.num_heads,
+        decoder_embed_dim=model_cfg.decoder_embed_dim,
+        decoder_depth=model_cfg.decoder_depth,
+        decoder_num_heads=model_cfg.decoder_num_heads,
+        pos_embed_type=model_cfg.pos_embed_type,
+        qkv_bias=model_cfg.qkv_bias,
+        dropout_rate=model_cfg.dropout_rate,
+        attn_drop=model_cfg.attn_drop,
+        drop_path=model_cfg.drop_path,
+        mask_ratio=model_cfg.mask_ratio,
+        mlp_ratio=model_cfg.mlp_ratio,
+        spatial_dims=model_cfg.spatial_dims,
+    )
+
+    # create loss
+    if config.loss_type == "MSE":
+        loss_criteria = MSELossPatched()
+    else:
+        raise ValueError(f"Unsupported loss type: {config.loss_type}")
+
+    if config.optimizer_type == "AdamW":
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=config.training_params.optimizer_params.lr,
+            weight_decay=config.training_params.optimizer_params.weight_decay,
+        )
+    else:
+        raise ValueError(f"Unsupported optimizer type: {config.optimizer_type}")
+
+    return MAETrainer(
+        model=model,
+        dataloader=None,  # to be set later
+        loss_criteria=loss_criteria,
+        scaler=GradScaler(),
+        optimizer=optimizer,
+        training_params=config.training_params,
+    )
 
 
 class MAETrainer:
@@ -41,7 +98,6 @@ class MAETrainer:
         model: MaskedAutoencoder,
         dataloader: DataLoader[torch.Tensor],
         loss_criteria: MSELossPatched,
-        eval_criteria: nn.CrossEntropyLoss,
         scaler: GradScaler,
         optimizer: torch.optim.Optimizer,
         training_params: TrainingParameters,
@@ -50,11 +106,10 @@ class MAETrainer:
         self.model = model
         self.dataloader = dataloader
         self.loss_criteria = loss_criteria
-        self.eval_criteria = eval_criteria
         self.scaler = scaler
         self.optimizer = optimizer
 
-        self.lr_params = training_params.lr_params
+        self.opt_params = training_params.optimizer_params
         self.lg_params = training_params.logging_params
 
         self.current_iteration = training_params.current_iteration
@@ -70,7 +125,7 @@ class MAETrainer:
         else:
             raise ValueError("Either max_num_epochs or max_num_iterations must be set.")
 
-        self.scaler = GradScaler()
+        self.scaler = scaler
 
     def fit(self):
         for _ in range(self.current_epoch, self.max_num_epochs):
@@ -99,8 +154,8 @@ class MAETrainer:
         for x, y in self.dataloader:
             # adjust learning rate
             lr = adjust_learning_rate(
-                self.lr_params.sched_type,
-                self.lr_params.lr,
+                self.opt_params.lr_sched_type,
+                self.opt_params.lr,
                 self.max_num_epochs,
                 self.warmup_epochs,
                 self.current_epoch,
