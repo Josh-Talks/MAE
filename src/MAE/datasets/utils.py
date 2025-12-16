@@ -122,7 +122,7 @@ def get_class(class_name: str, modules: Sequence[str]):
 
 
 def loader_classes(class_name: str):
-    modules = ["MAE.datasets.utils", "MAE.datasets.slice_builders"]
+    modules = ["MAE.datasets.utils", "MAE.datasets.dataset"]
     return get_class(class_name, modules)
 
 
