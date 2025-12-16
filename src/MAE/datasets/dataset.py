@@ -5,13 +5,23 @@ from pydantic import BaseModel
 from typing import (
     Any,
     List,
+    Literal,
     Optional,
     Sequence,
     Tuple,
 )
+
+import torch
+from torch.utils.data import DataLoader, ConcatDataset, Dataset
 from MAE.logging import get_logger
 from MAE.utils import is_ndarray
-from .utils import calculate_stats, get_roi_slice, mirror_pad, traverse_h5_paths
+from .utils import (
+    calculate_stats,
+    get_roi_slice,
+    mirror_pad,
+    traverse_h5_paths,
+    loader_classes,
+)
 from .slice_builders import (
     ShapeOnlyWrapper,
     SliceBuilderConfig,
@@ -23,6 +33,7 @@ logger = get_logger("Dataset")
 
 
 class DatasetConfig(BaseModel, frozen=True):
+    name: Literal["StandardHDF5Dataset",]
     file_paths: Sequence[str]
     raw_internal_path: str
     global_normalization: bool
@@ -42,6 +53,7 @@ default_loader: LoaderConfig = LoaderConfig(
     batch_size=32,
     num_workers=8,
     dataset=DatasetConfig(
+        name="StandardHDF5Dataset",
         file_paths=("/g/kreshuk/talks/data/Hmito/train_converted.h5",),
         raw_internal_path="raw",
         global_normalization=True,
@@ -62,7 +74,7 @@ default_loader: LoaderConfig = LoaderConfig(
 )
 
 
-class AbstractHDF5Dataset:
+class AbstractHDF5Dataset(Dataset[Any]):
     """
     Implementation of torch.utils.data.Dataset backed by the HDF5 files, which iterates over the raw and label datasets
     patch by patch with a given stride.
@@ -325,3 +337,31 @@ class StandardHDF5Dataset(AbstractHDF5Dataset):
                     self._raw = raw_data
         assert is_ndarray(self._raw), "Raw data should be a numpy ndarray"
         return self._raw[idx]
+
+
+def get_pretrain_loader(config: LoaderConfig):
+    dataset_class = loader_classes(config.dataset.name)
+
+    train_datasets: List[Dataset[Any]] = dataset_class.create_datasets(config.dataset)
+
+    num_workers = config.num_workers
+    logger.info(f"Number of workers for train/val dataloader: {num_workers}")
+    batch_size = config.batch_size
+
+    if torch.cuda.device_count() > 1:
+        logger.info(
+            f"{torch.cuda.device_count()} GPUs available. Using batch_size = {torch.cuda.device_count()} * {batch_size}"
+        )
+        batch_size = batch_size * torch.cuda.device_count()
+
+    logger.info(f"Batch size for train loader: {batch_size}")
+
+    train_loader: DataLoader[Any] = DataLoader(
+        ConcatDataset(train_datasets),
+        batch_size=batch_size,
+        pin_memory=True,
+        num_workers=num_workers,
+        shuffle=True,
+    )
+
+    return train_loader
