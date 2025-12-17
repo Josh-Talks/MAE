@@ -2,7 +2,7 @@ import numpy as np
 from pydantic import BaseModel
 import torch
 import torch.nn as nn
-from typing import Sequence, Union, Literal, Tuple
+from typing import Optional, Sequence, Union, Literal, Tuple
 
 from .embedding import PatchEmbed, PositionEmbed
 from .utils import ensure_tuple
@@ -15,7 +15,7 @@ class ModelConfig(BaseModel):
     patch_size: Union[Sequence[int], int]
     in_channels: int
     embed_dim: int
-    num_classes: int
+    num_classes: Optional[int]
     depth: int
     num_heads: int
     decoder_embed_dim: int
@@ -40,7 +40,7 @@ class MaskedAutoencoder(nn.Module):
         patch_size: Union[Sequence[int], int],
         in_channels: int,
         embed_dim: int,
-        num_classes: int,
+        num_classes: Optional[int],
         depth: int,
         num_heads: int,
         decoder_embed_dim: int,
