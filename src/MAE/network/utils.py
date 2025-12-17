@@ -1,7 +1,9 @@
+import os
 import numpy as np
 from numpy.typing import NDArray
+import shutil
 import torch
-from typing import Any, Sequence, Tuple, TypeGuard, Union, List, Optional
+from typing import Any, Dict, Sequence, Tuple, TypeGuard, Union, List, Optional
 
 
 def is_ndarray(v: Any) -> TypeGuard[NDArray[Any]]:
@@ -134,6 +136,21 @@ def patchify(
     else:
         raise ValueError("spatial_dims must be 2 or 3")
     return x
+
+
+def save_checkpoint(
+    state: Dict[str, Any],
+    checkpoint_dir: str,
+    checkpoint_name: Optional[str] = None,
+):
+    if not os.path.exists(checkpoint_dir):
+        os.mkdir(checkpoint_dir)
+
+    file_path = os.path.join(checkpoint_dir, "last_checkpoint.pytorch")
+    torch.save(state, file_path)
+    if checkpoint_name is not None:
+        named_file_path = os.path.join(checkpoint_dir, checkpoint_name)
+        _ = shutil.copyfile(file_path, named_file_path)
 
 
 def generate_test_images(
