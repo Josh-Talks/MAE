@@ -7,10 +7,10 @@ from torch.amp.autocast_mode import autocast
 from typing import List, Literal, Optional, Tuple, Union
 import wandb
 
-from MAE.loss import MSELossPatched
-from MAE.model import MaskedAutoencoder, ModelConfig
-from MAE.lr_sched import adjust_learning_rate
-from MAE.logging import get_current_lr, get_logger, RunningAverage
+from .loss import MSELossPatched
+from .model import MaskedAutoencoder, ModelConfig
+from .lr_sched import adjust_learning_rate
+from .logging import get_current_lr, get_logger, RunningAverage
 
 from MAE.datasets.dataset import get_pretrain_loader, LoaderConfig
 

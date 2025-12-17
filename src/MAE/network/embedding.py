@@ -5,8 +5,8 @@ import torch.nn as nn
 from typing import Sequence, Union, Callable, Optional, List, Literal, Tuple
 
 
-from MAE.utils import ensure_tuple
-from MAE.weight_init import trunc_normal_
+from .utils import ensure_tuple
+from .weight_init import trunc_normal_
 
 
 class PatchEmbed(nn.Module):
