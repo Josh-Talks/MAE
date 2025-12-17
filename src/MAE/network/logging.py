@@ -1,7 +1,17 @@
 import logging
-import torch
+from typing_extensions import Literal
+from pydantic import BaseModel
 import sys
-from typing import Dict
+import torch
+from typing import Dict, Optional, Union
+
+
+class WandbConfig(BaseModel):
+    project: str
+    name: str
+    mode: Literal["disabled", "online", "offline"]
+    run_id: Optional[str] = None
+    resume: Union[bool, None, Literal["allow", "never", "must", "auto"]] = None
 
 
 def get_current_lr(optimizer: torch.optim.Optimizer) -> float:
