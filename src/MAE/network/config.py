@@ -1,5 +1,7 @@
-import yaml
+from pathlib import Path
 import shutil
+from typing import Union
+import yaml
 
 
 def load_config_direct(config_path: str):
@@ -7,5 +9,5 @@ def load_config_direct(config_path: str):
     return config, config_path
 
 
-def copy_config(config_path: str, dest_path: str):
+def copy_config(config_path: Union[str, Path], dest_path: Union[str, Path]):
     _ = shutil.copyfile(config_path, dest_path)

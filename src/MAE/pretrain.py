@@ -1,3 +1,4 @@
+from pathlib import Path
 import typer
 from typing import Annotated
 import wandb
@@ -24,6 +25,13 @@ def main(
     trainer = create_trainer(cfg)
 
     # Copy config file
-    copy_config(config, cfg.training_params.logging_params.ckpt_dir)
+    yaml_filename = Path(config).name
+    copy_config(
+        config, Path(cfg.training_params.logging_params.ckpt_dir) / yaml_filename
+    )
     # Start training
     trainer.fit()
+
+
+if __name__ == "__main__":
+    typer.run(main)
