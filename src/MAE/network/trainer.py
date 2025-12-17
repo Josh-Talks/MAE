@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from torch.amp.grad_scaler import GradScaler
 from torch.amp.autocast_mode import autocast
 from typing import List, Literal, Optional, Tuple, Union
+from tqdm import tqdm
 import wandb
 
 from .logging import get_current_lr, get_logger, RunningAverage, WandbConfig
@@ -144,6 +145,7 @@ class MAETrainer:
     def fit(self):
         _ = self.model.to(self.device)
         for _ in range(self.current_epoch, self.max_num_epochs):
+            logger.info(f"Current epoch {self.current_epoch}/{self.max_num_epochs}")
             # train for one epoch
             loss, should_terminate = self.train()
 
@@ -174,7 +176,7 @@ class MAETrainer:
         wandb.log({"learning-rate": lr}, step=self.current_iteration)
         loss = torch.tensor(float("inf"))
 
-        for x in self.dataloader:
+        for x in tqdm(self.dataloader):
             # adjust learning rate
             lr = adjust_learning_rate(
                 self.opt_params.lr_sched_type,
