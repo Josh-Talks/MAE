@@ -244,6 +244,10 @@ class SingleZSliceBuilder:
             raw_dataset, patch_shape, stride_shape
         )
 
+    @property
+    def raw_slices(self):
+        return self._raw_slices
+
     def _validate_patch_fits(
         self, dataset: BaseShapeWrapper, patch_shape: Tuple[int, ...]
     ):
