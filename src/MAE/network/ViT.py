@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from MAE.drop import DropPath
+from .drop import DropPath
 
 
 class Attention(nn.Module):

@@ -4,10 +4,10 @@ import torch
 import torch.nn as nn
 from typing import Sequence, Union, Literal, Tuple
 
-from MAE.embedding import PatchEmbed, PositionEmbed
-from MAE.utils import ensure_tuple
-from MAE.ViT import TransformerBlock
-from MAE.weight_init import trunc_normal_
+from .embedding import PatchEmbed, PositionEmbed
+from .utils import ensure_tuple
+from .ViT import TransformerBlock
+from .weight_init import trunc_normal_
 
 
 class ModelConfig(BaseModel):

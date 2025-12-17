@@ -122,12 +122,15 @@ def get_class(class_name: str, modules: Sequence[str]):
 
 
 def loader_classes(class_name: str):
-    modules = ["MAE.datasets.utils", "MAE.datasets.slice_builders"]
+    modules = [
+        "MAE.datasets.utils",
+        "MAE.datasets.dataset",
+        "MAE.datasets.slice_builders",
+    ]
     return get_class(class_name, modules)
 
 
 def traverse_h5_paths(file_paths: Sequence[str]) -> List[str]:
-    assert isinstance(file_paths, list)
     results: List[str] = []
     for file_path in file_paths:
         if os.path.isdir(file_path):
@@ -141,3 +144,20 @@ def traverse_h5_paths(file_paths: Sequence[str]) -> List[str]:
         else:
             results.append(file_path)
     return results
+
+
+def return_dtype(str_dtype: str) -> np.dtype:
+    """
+    Converts string representation of a numpy dtype to actual numpy dtype.
+
+    Args:
+        str_dtype: string representation of a numpy dtype
+
+    Returns:
+        np.dtype: corresponding numpy dtype
+    """
+    try:
+        dtype = np.dtype(str_dtype)
+    except TypeError as e:
+        raise ValueError(f"Unsupported dtype string: {str_dtype}") from e
+    return dtype

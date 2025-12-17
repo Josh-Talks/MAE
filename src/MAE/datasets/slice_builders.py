@@ -48,19 +48,17 @@ class BaseShapeWrapper:
             dataset_shape: Tuple[int, ...] = tuple(dataset.shape)  # pyright: ignore
             base_shape = dataset_shape
             if self.roi is not None:
-                if isinstance(self.roi, tuple) and all(
+                assert isinstance(self.roi, tuple) and all(
                     isinstance(r, slice) for r in self.roi
-                ):
-                    base_shape = tuple(
-                        (
-                            len(range(*slice_obj.indices(int(dim_size))))
-                            if slice_obj != slice(None)
-                            else int(dim_size)
-                        )
-                        for slice_obj, dim_size in zip(self.roi, dataset_shape)
+                ), f"ROI must be a tuple of slices, got {type(self.roi)}"
+                base_shape = tuple(
+                    (
+                        len(range(*slice_obj.indices(int(dim_size))))
+                        if slice_obj != slice(None)
+                        else int(dim_size)
                     )
-                elif isinstance(self.roi, (list, tuple)):
-                    base_shape = (len(self.roi),) + dataset_shape[1:]
+                    for slice_obj, dim_size in zip(self.roi, dataset_shape)
+                )
 
             # Apply padding to shape
             if self._needs_padding:

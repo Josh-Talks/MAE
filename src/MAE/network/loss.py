@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
 
-# from MAE.dataclass import DataDimensions
-from MAE.utils import patchify
-from MAE.model import MaskedAutoencoder
+from .utils import patchify
+from .model import MaskedAutoencoder
 
 
 def mask_patched(input: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:

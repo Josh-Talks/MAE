@@ -2,16 +2,27 @@ from abc import abstractmethod
 import h5py  # pyright: ignore[reportMissingTypeStubs]
 from numpy.typing import NDArray
 from pydantic import BaseModel
+import time
 from typing import (
     Any,
     List,
+    Literal,
     Optional,
     Sequence,
     Tuple,
 )
+
+import torch
+from torch.utils.data import DataLoader, ConcatDataset, Dataset
 from MAE.logging import get_logger
 from MAE.utils import is_ndarray
-from .utils import calculate_stats, get_roi_slice, mirror_pad, traverse_h5_paths
+from .utils import (
+    calculate_stats,
+    get_roi_slice,
+    mirror_pad,
+    traverse_h5_paths,
+    loader_classes,
+)
 from .slice_builders import (
     ShapeOnlyWrapper,
     SliceBuilderConfig,
@@ -23,6 +34,7 @@ logger = get_logger("Dataset")
 
 
 class DatasetConfig(BaseModel, frozen=True):
+    name: Literal["StandardHDF5Dataset",]
     file_paths: Sequence[str]
     raw_internal_path: str
     global_normalization: bool
@@ -30,6 +42,8 @@ class DatasetConfig(BaseModel, frozen=True):
     slice_builder: SliceBuilderConfig
     transformations: transforms_type
     roi: Optional[Sequence[Tuple[int, ...]]]
+    output_spatial_dims: Literal["2D", "3D"]
+    timer: bool = False
 
 
 class LoaderConfig(BaseModel, frozen=True):
@@ -42,10 +56,14 @@ default_loader: LoaderConfig = LoaderConfig(
     batch_size=32,
     num_workers=8,
     dataset=DatasetConfig(
-        file_paths=("/g/kreshuk/talks/data/Hmito/train_converted.h5",),
+        name="StandardHDF5Dataset",
+        file_paths=[
+            "/g/kreshuk/talks/data/Hmito/train_converted.h5",
+        ],
         raw_internal_path="raw",
         global_normalization=True,
         global_percentiles=None,
+        output_spatial_dims="2D",
         roi=((0, 150), (0, 1280), (0, 1280)),
         transformations={
             "raw": [
@@ -62,7 +80,7 @@ default_loader: LoaderConfig = LoaderConfig(
 )
 
 
-class AbstractHDF5Dataset:
+class AbstractHDF5Dataset(Dataset[Any]):
     """
     Implementation of torch.utils.data.Dataset backed by the HDF5 files, which iterates over the raw and label datasets
     patch by patch with a given stride.
@@ -87,11 +105,14 @@ class AbstractHDF5Dataset:
         raw_internal_path: str = "raw",
         global_normalization: bool = True,
         global_percentiles: Optional[Tuple[float, float]] = None,
+        output_spatial_dims: Literal["2D", "3D"] = "3D",
         auto_padding: Optional[Tuple[int, ...]] = None,
+        timer: bool = False,
     ):
         super().__init__()
 
         self.file_path = file_path
+        self.timer = timer
         if roi is not None:
             self.roi = get_roi_slice(roi)
         else:
@@ -99,6 +120,13 @@ class AbstractHDF5Dataset:
         self.raw_internal_path = raw_internal_path
         self.patch_shape = slice_builder_config.patch_shape
         self.auto_padding = auto_padding or (0, 0, 0)
+
+        if output_spatial_dims == "2D":
+            assert (
+                self.patch_shape[0] == 1
+            ), "For 2D output, the patch shape's first dimension must be 1."
+
+        self.output_spatial_dims = output_spatial_dims
 
         if global_normalization:
             logger.info("Calculating mean and std of the raw data...")
@@ -164,9 +192,35 @@ class AbstractHDF5Dataset:
         if idx >= len(self):
             raise StopIteration
 
+        t_start = time.perf_counter()
         raw_idx = self.raw_slices[idx]
+        t_slice_lookup = time.perf_counter() - t_start
 
-        raw_patch_transformed = self.raw_transform(self.get_raw_patch(raw_idx))
+        t_patch_start = time.perf_counter()
+        raw_patch = self.get_raw_patch(raw_idx)
+        t_get_patch = time.perf_counter() - t_patch_start
+
+        t_transform_start = time.perf_counter()
+        raw_patch_transformed = self.raw_transform(raw_patch)
+        t_transform = time.perf_counter() - t_transform_start
+
+        if self.output_spatial_dims == "2D":
+            assert (
+                raw_patch_transformed.shape[-3] == 1
+            ), "Depth dimension must be singleton for 2D output"
+            # remove singleton depth dimension
+            raw_patch_transformed = raw_patch_transformed.squeeze(-3)
+
+        t_total = time.perf_counter() - t_start
+
+        # Log timing info every 100 batches to avoid spam
+        if self.timer and idx % 100 == 0:
+            logger.info(
+                f"[Idx {idx}] Timing - Total: {t_total*1000:.2f}ms | "
+                + f"Slice lookup: {t_slice_lookup*1000:.2f}ms | "
+                + f"Get patch: {t_get_patch*1000:.2f}ms | "
+                + f"Transform: {t_transform*1000:.2f}ms"
+            )
 
         return raw_patch_transformed
 
@@ -193,7 +247,8 @@ class AbstractHDF5Dataset:
                     raw_internal_path=ds_cfg.raw_internal_path,
                     global_normalization=ds_cfg.global_normalization,
                     global_percentiles=ds_cfg.global_percentiles,
-                    auto_padding=None,
+                    output_spatial_dims=ds_cfg.output_spatial_dims,
+                    timer=ds_cfg.timer,
                 )
                 datasets.append(dataset)
             except Exception:
@@ -216,6 +271,8 @@ class StandardHDF5Dataset(AbstractHDF5Dataset):
         raw_internal_path: str = "raw",
         global_normalization: bool = True,
         global_percentiles: Optional[Tuple[float, float]] = None,
+        output_spatial_dims: Literal["2D", "3D"] = "3D",
+        timer: bool = False,
     ):
 
         # Calculate automatic padding before calling parent constructor
@@ -238,7 +295,9 @@ class StandardHDF5Dataset(AbstractHDF5Dataset):
             raw_internal_path=raw_internal_path,
             global_normalization=global_normalization,
             global_percentiles=global_percentiles,
+            output_spatial_dims=output_spatial_dims,
             auto_padding=self.auto_padding,
+            timer=timer,
         )
         self._raw = None
         self._raw_padded = None
@@ -261,19 +320,18 @@ class StandardHDF5Dataset(AbstractHDF5Dataset):
             assert isinstance(dataset, h5py.Dataset), "Raw dataset not found"
             dataset_shape: Tuple[int, ...] = tuple(dataset.shape)  # pyright: ignore
             if roi is not None:
-                if isinstance(roi, tuple) and all(isinstance(r, slice) for r in roi):
-                    # Calculate shape for slice-based ROI
-                    volume_shape = tuple(
-                        (
-                            len(range(*slice_obj.indices(int(dim_size))))
-                            if slice_obj != slice(None)
-                            else int(dim_size)
-                        )
-                        for slice_obj, dim_size in zip(roi, dataset_shape)
+                assert isinstance(roi, tuple) and all(
+                    isinstance(s, slice) for s in roi
+                ), f"ROI must be a tuple of slices, got {type(roi)}"
+                # Calculate shape for slice-based ROI
+                volume_shape = tuple(
+                    (
+                        len(range(*slice_obj.indices(int(dim_size))))
+                        if slice_obj != slice(None)
+                        else int(dim_size)
                     )
-                elif isinstance(roi, (list, tuple)):
-                    # Handle index-based ROI (first dimension)
-                    volume_shape = (len(roi),) + dataset_shape[1:]
+                    for slice_obj, dim_size in zip(roi, dataset_shape)
+                )
             else:
                 volume_shape = dataset_shape
             # Handle 4D case (remove channel dimension)
@@ -303,6 +361,15 @@ class StandardHDF5Dataset(AbstractHDF5Dataset):
 
     def get_raw_patch(self, idx: int):
         if self._raw is None:
+            import os
+
+            pid = os.getpid()
+            if self.timer:
+                logger.info(
+                    f"[FIRST LOAD - PID {pid}] Loading full volume from {self.file_path}"
+                )
+            t_load_start = time.perf_counter()
+
             with h5py.File(self.file_path, "r") as f:
                 assert (
                     self.raw_internal_path in f
@@ -311,17 +378,82 @@ class StandardHDF5Dataset(AbstractHDF5Dataset):
                 assert isinstance(
                     ds, h5py.Dataset
                 ), f"Dataset {self.raw_internal_path} is not a valid H5 dataset"
+
+                t_h5_open = time.perf_counter() - t_load_start
+                t_read_start = time.perf_counter()
+
                 if self.roi is not None:
                     raw_data = ds[self.roi]  # pyright: ignore
                 else:
                     raw_data = ds[:]  # pyright: ignore
 
+                t_h5_read = time.perf_counter() - t_read_start
                 assert is_ndarray(raw_data), "Raw data should be a numpy ndarray"
+
+                if self.timer:
+                    logger.info(
+                        f"[FIRST LOAD] Raw data shape: {raw_data.shape}, dtype: {raw_data.dtype}"
+                    )
+                    logger.info(
+                        f"[FIRST LOAD] H5 open time: {t_h5_open*1000:.2f}ms, H5 read time: {t_h5_read*1000:.2f}ms"
+                    )
 
                 # Apply automatic padding once and cache
                 if self._needs_padding:
+                    t_pad_start = time.perf_counter()
                     self._raw = mirror_pad(raw_data, self.auto_padding)
+                    t_pad = time.perf_counter() - t_pad_start
+                    if self.timer:
+                        logger.info(
+                            f"[FIRST LOAD] Padding time: {t_pad*1000:.2f}ms, new shape: {self._raw.shape}"
+                        )
                 else:
                     self._raw = raw_data
+
+                t_total_load = time.perf_counter() - t_load_start
+                if self.timer:
+                    logger.info(
+                        f"[FIRST LOAD - PID {pid}] Total load time: {t_total_load:.3f}s"
+                    )
+
+        # Time the indexing operation
+        t_index_start = time.perf_counter()
         assert is_ndarray(self._raw), "Raw data should be a numpy ndarray"
-        return self._raw[idx]
+        result = self._raw[idx]
+        t_index = time.perf_counter() - t_index_start
+
+        # Log indexing time if it's unexpectedly slow (> 1ms)
+        if self.timer and t_index > 0.001:
+            logger.warning(
+                f"[SLOW INDEX] Indexing took {t_index*1000:.2f}ms for idx type: {type(idx)}, shape: {result.shape}"
+            )
+
+        return result
+
+
+def get_pretrain_loader(config: LoaderConfig):
+    dataset_class = loader_classes(config.dataset.name)
+
+    train_datasets: List[Dataset[Any]] = dataset_class.create_datasets(config.dataset)
+
+    num_workers = config.num_workers
+    logger.info(f"Number of workers for train/val dataloader: {num_workers}")
+    batch_size = config.batch_size
+
+    if torch.cuda.device_count() > 1:
+        logger.info(
+            f"{torch.cuda.device_count()} GPUs available. Using batch_size = {torch.cuda.device_count()} * {batch_size}"
+        )
+        batch_size = batch_size * torch.cuda.device_count()
+
+    logger.info(f"Batch size for train loader: {batch_size}")
+
+    train_loader: DataLoader[Any] = DataLoader(
+        ConcatDataset(train_datasets),
+        batch_size=batch_size,
+        pin_memory=True,
+        num_workers=num_workers,
+        shuffle=True,
+    )
+
+    return train_loader
