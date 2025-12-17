@@ -3,8 +3,8 @@ from numpy.typing import NDArray
 from pydantic import BaseModel
 from typing import Any, List, Literal, Optional, Tuple, Union
 
-from MAE.utils import ensure_tuple, is_ndarray
-from MAE.logging import get_logger
+from MAE.network.utils import ensure_tuple, is_ndarray
+from MAE.network.logging import get_logger
 from .utils import mirror_pad, loader_classes
 
 logger = get_logger("Dataset")
@@ -243,6 +243,10 @@ class SingleZSliceBuilder:
         self._raw_slices = self._build_single_z_slices(
             raw_dataset, patch_shape, stride_shape
         )
+
+    @property
+    def raw_slices(self):
+        return self._raw_slices
 
     def _validate_patch_fits(
         self, dataset: BaseShapeWrapper, patch_shape: Tuple[int, ...]

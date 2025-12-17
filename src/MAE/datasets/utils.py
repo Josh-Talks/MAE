@@ -8,7 +8,7 @@ from typing import Any, List, Optional, Sequence, Tuple, Union
 
 from pydantic import BaseModel
 
-from MAE.logging import get_logger
+from MAE.network.logging import get_logger
 
 logger = get_logger("Dataset")
 

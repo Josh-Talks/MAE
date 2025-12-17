@@ -1,7 +1,11 @@
+import os
+from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
+import shutil
 import torch
-from typing import Any, Sequence, Tuple, TypeGuard, Union, List, Optional
+import torch.nn as nn
+from typing import Any, Dict, Sequence, Tuple, TypeGuard, Union, List, Optional
 
 
 def is_ndarray(v: Any) -> TypeGuard[NDArray[Any]]:
@@ -134,6 +138,58 @@ def patchify(
     else:
         raise ValueError("spatial_dims must be 2 or 3")
     return x
+
+
+def save_checkpoint(
+    state: Dict[str, Any],
+    checkpoint_dir: str,
+    checkpoint_name: Optional[str] = None,
+):
+    if not os.path.exists(checkpoint_dir):
+        os.mkdir(checkpoint_dir)
+
+    file_path = os.path.join(checkpoint_dir, "last_checkpoint.pytorch")
+    torch.save(state, file_path)
+    if checkpoint_name is not None:
+        named_file_path = os.path.join(checkpoint_dir, checkpoint_name)
+        _ = shutil.copyfile(file_path, named_file_path)
+
+
+def load_checkpoint(
+    checkpoint_path: Union[str, Path],
+    model: nn.Module,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    model_key: Optional[str] = "model_state_dict",
+    optimizer_key: Optional[str] = "optimizer_state_dict",
+):
+    """Loads model and training parameters from a given checkpoint_path
+    If optimizer is provided, loads optimizer's state_dict of as well.
+
+    Args:
+        checkpoint_path (string): path to the checkpoint to be loaded
+        model (torch.nn.Module): model into which the parameters are to be copied
+        optimizer (torch.optim.Optimizer) optional: optimizer instance into
+            which the parameters are to be copied
+
+    Returns:
+        state
+    """
+    if not os.path.exists(checkpoint_path):
+        raise IOError(f"Checkpoint '{checkpoint_path}' does not exist")
+
+    state = torch.load(checkpoint_path, map_location="cpu")
+    if model_key is not None:
+        _ = model.load_state_dict(state[model_key])
+    else:
+        _ = model.load_state_dict(state)
+
+    if optimizer is not None:
+        assert (
+            optimizer_key is not None
+        ), "optimizer_key must be provided if optimizer is given"
+        optimizer.load_state_dict(state[optimizer_key])
+
+    return state
 
 
 def generate_test_images(
