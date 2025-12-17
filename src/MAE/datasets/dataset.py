@@ -14,8 +14,8 @@ from typing import (
 
 import torch
 from torch.utils.data import DataLoader, ConcatDataset, Dataset
-from MAE.logging import get_logger
-from MAE.utils import is_ndarray
+from MAE.network.logging import get_logger
+from MAE.network.utils import is_ndarray
 from .utils import (
     calculate_stats,
     get_roi_slice,
